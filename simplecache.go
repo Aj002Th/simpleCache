@@ -2,6 +2,7 @@ package simpleCache
 
 import (
 	"errors"
+	"log"
 	"sync"
 )
 
@@ -23,9 +24,10 @@ func (f GetterFunc) Get(key string) ([]byte, error) {
 
 // Group 核心结构
 type Group struct {
-	name      string // 命名空间
-	getter    Getter // 回调函数
-	mainCache cache  // 属于这个group的缓存
+	name      string     // 命名空间
+	getter    Getter     // 回调函数
+	mainCache cache      // 属于这个group的缓存
+	peers     PeerPicker // 以此获取远端缓存
 }
 
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
@@ -46,6 +48,16 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 
 	groups[name] = g
 	return g
+}
+
+// RegisterPeerPicker 相当于把PeerPicker的初始化从NewGroup中单独拉出来的
+// 主要是考虑到这个PeerPicker可能比较复杂, 而且NewGroup参数列表已经很长了
+// 这个函数每个Group只能调用一次
+func (g *Group) RegisterPeerPicker(picker PeerPicker) {
+	if g.peers != nil {
+		panic("RegisterPeerPicker have been called before")
+	}
+	g.peers = picker
 }
 
 // GetGroup 对应group不存在时返回nil
@@ -79,6 +91,18 @@ func (g *Group) Get(key string) (ByteView, error) {
 // 缓存未命中时的处理
 func (g *Group) load(key string) (ByteView, error) {
 	// 先只实现单机版, 不会从远端缓存拉取数据
+	peerGetter, ok := g.peers.PickPeer(key)
+	if ok {
+		// 请求远端缓存获取数据
+		data, err := g.getFromPeer(peerGetter, key)
+		if err == nil {
+			return data, nil
+		}
+		// 失败了就打日志+本地执行回调
+		log.Printf("get data(key:%s) from peer failed: %v", key, err)
+	}
+
+	// 本地调用回调获取数据
 	return g.getLocally(key)
 }
 
@@ -94,9 +118,13 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 	return value, nil
 }
 
-// todo:从远端缓存获取数据
-func (g *Group) getRemote(key string) (ByteView, error) {
-	return ByteView{}, nil
+// 从peer获取数据
+func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
+	data, err := peer.GetDataFromPeer(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+	return ByteView{b: data}, nil
 }
 
 // 向group的缓存中添加数据
