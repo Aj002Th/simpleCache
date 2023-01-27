@@ -16,8 +16,8 @@ func (v ByteView) String() string {
 	return string(v.b)
 }
 
-// ByteSlices 为了实现只读,需要进行深拷贝
-func (v ByteView) ByteSlices() []byte {
+// ByteSlice 为了实现只读,需要进行深拷贝
+func (v ByteView) ByteSlice() []byte {
 	data := make([]byte, v.Len())
 	copy(data, v.b)
 	return data
