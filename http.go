@@ -87,18 +87,19 @@ func (p *HttpPool) PickPeer(key string) (PeerGetter, bool) {
 	if peerKey == "" || peerKey == p.self {
 		return nil, false
 	}
+	p.Log("Pick peer %s", peerKey)
 	return p.httpGetters[peerKey], true
 }
 
-func (p *HttpPool) Log(method, path string) {
-	log.Printf("[server: %s] %s - %s", p.self, method, path)
+func (p *HttpPool) Log(format string, v ...any) {
+	log.Printf("[server: %s] %s", p.self, fmt.Sprintf(format, v...))
 }
 
 // peer节点之间使用http协议进行通信
 // 路径规则：ip:port/basePath/groupName/key
 func (p *HttpPool) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
-	p.Log(req.Method, path)
+	p.Log("%s - %s", req.Method, path)
 	if !strings.HasPrefix(path, p.basePath) {
 		http.Error(w, "do not match HttpPool's base path", 400)
 		return
