@@ -3,6 +3,7 @@ package simpleCache
 import (
 	"errors"
 	"log"
+	"simpleCache/singleflight"
 	"sync"
 )
 
@@ -24,10 +25,11 @@ func (f GetterFunc) Get(key string) ([]byte, error) {
 
 // Group 核心结构
 type Group struct {
-	name      string     // 命名空间
-	getter    Getter     // 回调函数
-	mainCache cache      // 属于这个group的缓存
-	peers     PeerPicker // 以此获取远端缓存
+	name      string              // 命名空间
+	getter    Getter              // 回调函数
+	mainCache cache               // 属于这个group的缓存
+	peers     PeerPicker          // 以此获取远端缓存
+	loader    *singleflight.Group // 合并重复查询请求,防止缓存击穿
 }
 
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
@@ -44,6 +46,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		mainCache: cache{
 			cacheBytes: cacheBytes,
 		},
+		loader: &singleflight.Group{},
 	}
 
 	groups[name] = g
@@ -90,20 +93,27 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 // 缓存未命中时的处理
 func (g *Group) load(key string) (ByteView, error) {
-	// 先只实现单机版, 不会从远端缓存拉取数据
-	peerGetter, ok := g.peers.PickPeer(key)
-	if ok {
-		// 请求远端缓存获取数据
-		data, err := g.getFromPeer(peerGetter, key)
-		if err == nil {
-			return data, nil
+	// 将有可能调用回调函数从数据源载入数据的过程都用singlefilght保护起来
+	data, err := g.loader.Do(key, func() (any, error) {
+		peerGetter, ok := g.peers.PickPeer(key)
+		if ok {
+			// 请求远端缓存获取数据
+			data, err := g.getFromPeer(peerGetter, key)
+			if err == nil {
+				return data, nil
+			}
+			// 失败了就打日志+本地执行回调
+			log.Printf("get data(key:%s) from peer failed: %v", key, err)
 		}
-		// 失败了就打日志+本地执行回调
-		log.Printf("get data(key:%s) from peer failed: %v", key, err)
-	}
 
-	// 本地调用回调获取数据
-	return g.getLocally(key)
+		// 本地调用回调获取数据
+		return g.getLocally(key)
+	})
+
+	if err != nil {
+		return ByteView{}, err
+	}
+	return data.(ByteView), nil
 }
 
 // 本地调用回调函数从数据源获取数据
