@@ -2,10 +2,13 @@ package simpleCache
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"simpleCache/consistenthash"
+	"simpleCache/pb"
 	"strings"
 	"sync"
 )
@@ -24,23 +27,34 @@ func NewHttpGetter(basePath string) *HttpGetter {
 	return &HttpGetter{basePath: basePath}
 }
 
-func (g *HttpGetter) GetDataFromPeer(group, key string) ([]byte, error) {
-	url := fmt.Sprintf("%s/%s/%s", g.basePath, group, key)
-	resp, err := http.Get(url)
+func (g *HttpGetter) GetDataFromPeer(in *pb.Request, out *pb.Response) error {
+	peerUrl := fmt.Sprintf(
+		"%s/%s/%s",
+		g.basePath,
+		url.QueryEscape(in.GetGroup()), // url转义保护
+		url.QueryEscape(in.GetKey()),
+	)
+	resp, err := http.Get(peerUrl)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("get data from %s failed with status %d", url, resp.StatusCode)
+		return fmt.Errorf("get data from %s failed with status %d", peerUrl, resp.StatusCode)
 	}
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return data, nil
+
+	// 将得到的结果反序列化到out中
+	if err = proto.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("decoding response body failed: %v", err)
+	}
+
+	return nil
 }
 
 // HttpPool http服务端
@@ -121,7 +135,13 @@ func (p *HttpPool) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	resp, err := proto.Marshal(&pb.Response{Value: data.ByteSlice()})
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
 	// 将数据当成普通二进制传输
 	w.Header().Set("Content-Type", "application/octet-stream")
-	_, _ = w.Write(data.ByteSlice())
+	_, _ = w.Write(resp)
 }

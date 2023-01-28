@@ -3,6 +3,7 @@ package simpleCache
 import (
 	"errors"
 	"log"
+	"simpleCache/pb"
 	"simpleCache/singleflight"
 	"sync"
 )
@@ -130,11 +131,16 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 
 // 从peer获取数据
 func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
-	data, err := peer.GetDataFromPeer(g.name, key)
+	req := &pb.Request{
+		Group: g.name,
+		Key:   key,
+	}
+	resp := &pb.Response{}
+	err := peer.GetDataFromPeer(req, resp)
 	if err != nil {
 		return ByteView{}, err
 	}
-	return ByteView{b: data}, nil
+	return ByteView{b: resp.Value}, nil
 }
 
 // 向group的缓存中添加数据

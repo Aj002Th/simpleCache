@@ -1,5 +1,7 @@
 package simpleCache
 
+import "simpleCache/pb"
+
 // 默认的实现在http.go
 // 使用者可以自己实现对应的接口达到扩展功能的目的
 // 例如使用其他通信协议等
@@ -13,5 +15,5 @@ type PeerPicker interface {
 // PeerGetter 本地客户端需要实现
 // 从指定的peer中获取相应的数据
 type PeerGetter interface {
-	GetDataFromPeer(group, key string) ([]byte, error)
+	GetDataFromPeer(in *pb.Request, out *pb.Response) error
 }
